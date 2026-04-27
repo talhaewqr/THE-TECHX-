@@ -3,8 +3,8 @@ const { isJidGroup } = require('@whiskeysockets/baileys');
 const fs = require('fs');
 const path = require('path');
 
-// ========== TRACK DUPLICATE MESSAGES ==========
-const sentMessages = new Set();
+// ========== TRACK SENT MESSAGES ==========
+const sentTracker = new Set();
 
 // ========== SETTINGS FILES ==========
 const SETTINGS_DIR = './database';
@@ -16,142 +16,73 @@ if (!fs.existsSync(SETTINGS_DIR)) {
     fs.mkdirSync(SETTINGS_DIR, { recursive: true });
 }
 
-// Load welcome settings
-function loadWelcomeSettings() {
+// Load settings
+function loadSettings(file) {
     try {
-        if (fs.existsSync(WELCOME_FILE)) {
-            return JSON.parse(fs.readFileSync(WELCOME_FILE, 'utf8'));
+        if (fs.existsSync(file)) {
+            return JSON.parse(fs.readFileSync(file, 'utf8'));
         }
     } catch (e) {}
     return {};
 }
 
-// Load goodbye settings
-function loadGoodbyeSettings() {
-    try {
-        if (fs.existsSync(GOODBYE_FILE)) {
-            return JSON.parse(fs.readFileSync(GOODBYE_FILE, 'utf8'));
-        }
-    } catch (e) {}
-    return {};
-}
-
-// Check if welcome is enabled for this group
-function isWelcomeEnabled(groupId) {
-    const settings = loadWelcomeSettings();
+// Check if enabled
+function isEnabled(groupId, file) {
+    const settings = loadSettings(file);
     return settings[groupId] === true;
 }
-
-// Check if goodbye is enabled for this group
-function isGoodbyeEnabled(groupId) {
-    const settings = loadGoodbyeSettings();
-    return settings[groupId] === true;
-}
-
-// Default profile pictures
-const defaultProfilePics = [
-    'https://i.ibb.co/KhYC4FY/1221bc0bdd2354b42b293317ff2adbcf-icon.png',
-    'https://i.ibb.co/KhYC4FY/1221bc0bdd2354b42b293317ff2adbcf-icon.png',
-    'https://i.ibb.co/KhYC4FY/1221bc0bdd2354b42b293317ff2adbcf-icon.png',
-];
-
-// Newsletter context
-const getContextInfo = (mentionedJids) => ({
-    mentionedJid: mentionedJids,
-    forwardingScore: 999,
-    isForwarded: true,
-    forwardedNewsletterMessageInfo: {
-        newsletterJid: '120363425629935700@newsletter',
-        newsletterName: "𝙏𝙝𝙚 𝙏𝙚𝙘𝙝𝙓",
-        serverMessageId: 200,
-    },
-});
 
 module.exports = async (conn, update) => {
     try {
         const { id, participants, action } = update;
         if (!id || !isJidGroup(id) || !participants) return;
 
-        const groupMetadata = await conn.groupMetadata(id);
-        const groupName = groupMetadata.subject || "Group";
-        const desc = groupMetadata.desc || "No Description available.";
-        const groupMembersCount = groupMetadata.participants?.length || 0;
-        const timestamp = new Date().toLocaleString();
-
         for (const participant of participants) {
             const userName = participant.split("@")[0];
             
-            // 🔥 CHECK FOR DUPLICATE MESSAGES
+            // Duplicate check
             const msgKey = `${id}_${action}_${participant}`;
-            
-            if (sentMessages.has(msgKey)) {
-                console.log(`⏭️ Already sent ${action} for ${participant}, skipping...`);
+            if (sentTracker.has(msgKey)) {
+                console.log(`⏭️ Already sent ${action} for ${userName}, skipping...`);
                 continue;
-            }
-
-            // Get profile picture
-            let userPpUrl;
-            try {
-                userPpUrl = await conn.profilePictureUrl(participant, "image");
-            } catch {
-                userPpUrl = defaultProfilePics[Math.floor(Math.random() * defaultProfilePics.length)];
             }
 
             // ========== WELCOME ==========
             if (action === "add") {
-                // 🔥 CHECK IF WELCOME IS ENABLED
-                if (!isWelcomeEnabled(id)) {
-                    console.log(`⏭️ Welcome disabled for ${id}, skipping...`);
+                if (!isEnabled(id, WELCOME_FILE)) {
+                    console.log(`⏭️ Welcome disabled for ${id}`);
                     continue;
                 }
                 
-                sentMessages.add(msgKey);
-                setTimeout(() => sentMessages.delete(msgKey), 5000);
+                sentTracker.add(msgKey);
 
-                const welcomeText = `
-╭───❖ 🎒 *WELCOME HOMIE* ❖───
-│ 👋 Hey @${userName}!
-│ 🏠 Welcome to: *${groupName}*
-│ 🔢 Member #: *${groupMembersCount}*
-╰❖ *_ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝙏𝙝𝙚 𝙏𝙚𝙘𝙝𝙓_*❖─
-                `.trim();
+                const welcomeText = `@${userName} *_ᗯᗴᒪᑕᗝᗰᗴ  ᕼᗝǤƳᗩ  ᗩᑭᛕᗩ  ᗪᗝᔕ丅 💗👀🥹_*`;
 
                 await conn.sendMessage(id, {
-                    image: { url: userPpUrl },
-                    caption: welcomeText,
-                    mentions: [participant],
-                    contextInfo: getContextInfo([participant]),
+                    text: welcomeText,
+                    mentions: [participant]
                 });
                 
-                console.log(`✅ Welcome sent to ${userName} in ${groupName}`);
+                console.log(`✅ Welcome sent to ${userName}`);
             }
 
             // ========== GOODBYE ==========
             else if (action === "remove") {
-                // 🔥 CHECK IF GOODBYE IS ENABLED
-                if (!isGoodbyeEnabled(id)) {
-                    console.log(`⏭️ Goodbye disabled for ${id}, skipping...`);
+                if (!isEnabled(id, GOODBYE_FILE)) {
+                    console.log(`⏭️ Goodbye disabled for ${id}`);
                     continue;
                 }
                 
-                sentMessages.add(msgKey);
-                setTimeout(() => sentMessages.delete(msgKey), 5000);
+                sentTracker.add(msgKey);
 
-                const goodbyeText = `
-╭───❖ 😢 *GOODBYE* ❖───
-│ 👋 Farewell @${userName}!
-│ 🏠 You left: *${groupName}*
-╰❖ *_ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝙏𝙝𝙚 𝙏𝙚𝙘𝙝𝙓_* ❖─
-                `.trim();
+                const goodbyeText = `@${userName} *_left us we will miss😔💗_*`;
 
                 await conn.sendMessage(id, {
-                    image: { url: userPpUrl },
-                    caption: goodbyeText,
-                    mentions: [participant],
-                    contextInfo: getContextInfo([participant]),
+                    text: goodbyeText,
+                    mentions: [participant]
                 });
                 
-                console.log(`✅ Goodbye sent to ${userName} from ${groupName}`);
+                console.log(`✅ Goodbye sent to ${userName}`);
             }
         }
 
